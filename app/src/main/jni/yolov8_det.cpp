@@ -152,118 +152,46 @@ static inline float sigmoid(float x)
     return 1.0f / (1.0f + expf(-x));
 }
 
-static void generate_proposals(const ncnn::Mat& pred, int stride, const ncnn::Mat& in_pad, float prob_threshold, std::vector<Object>& objects)
+// ultralytics NCNN export: out0 is fully decoded, shape 8400 x (4 + num_class)
+//   cols 0-3 : x1, y1, x2, y2 (xyxy in 640-input pixel coords, already DFL-decoded)
+//   cols 4.. : per-class scores (already sigmoid'd)
+static void generate_proposals(const ncnn::Mat& pred, float prob_threshold, std::vector<Object>& objects)
 {
-    const int w = in_pad.w;
-    const int h = in_pad.h;
+    const int num_row = pred.h;        // 8400
+    const int num_class = pred.w - 4;  // 39
 
-    const int num_grid_x = w / stride;
-    const int num_grid_y = h / stride;
-
-    const int reg_max_1 = 16;
-    const int num_class = pred.w - reg_max_1 * 4; // number of classes. 80 for COCO
-
-    for (int y = 0; y < num_grid_y; y++)
+    for (int i = 0; i < num_row; i++)
     {
-        for (int x = 0; x < num_grid_x; x++)
+        const ncnn::Mat pred_row = pred.row_range(i, 1);
+
+        int label = -1;
+        float score = -FLT_MAX;
         {
-            const ncnn::Mat pred_grid = pred.row_range(y * num_grid_x + x, 1);
+            const ncnn::Mat pred_score = pred_row.range(4, num_class);
 
-            // find label with max score
-            int label = -1;
-            float score = -FLT_MAX;
+            for (int k = 0; k < num_class; k++)
             {
-                const ncnn::Mat pred_score = pred_grid.range(reg_max_1 * 4, num_class);
-
-                for (int k = 0; k < num_class; k++)
+                float s = pred_score[k];
+                if (s > score)
                 {
-                    float s = pred_score[k];
-                    if (s > score)
-                    {
-                        label = k;
-                        score = s;
-                    }
+                    label = k;
+                    score = s;
                 }
-
-                score = sigmoid(score);
-            }
-
-            if (score >= prob_threshold)
-            {
-                ncnn::Mat pred_bbox = pred_grid.range(0, reg_max_1 * 4).reshape(reg_max_1, 4);
-
-                {
-                    ncnn::Layer* softmax = ncnn::create_layer("Softmax");
-
-                    ncnn::ParamDict pd;
-                    pd.set(0, 1); // axis
-                    pd.set(1, 1);
-                    softmax->load_param(pd);
-
-                    ncnn::Option opt;
-                    opt.num_threads = 1;
-                    opt.use_packing_layout = false;
-
-                    softmax->create_pipeline(opt);
-
-                    softmax->forward_inplace(pred_bbox, opt);
-
-                    softmax->destroy_pipeline(opt);
-
-                    delete softmax;
-                }
-
-                float pred_ltrb[4];
-                for (int k = 0; k < 4; k++)
-                {
-                    float dis = 0.f;
-                    const float* dis_after_sm = pred_bbox.row(k);
-                    for (int l = 0; l < reg_max_1; l++)
-                    {
-                        dis += l * dis_after_sm[l];
-                    }
-
-                    pred_ltrb[k] = dis * stride;
-                }
-
-                float pb_cx = (x + 0.5f) * stride;
-                float pb_cy = (y + 0.5f) * stride;
-
-                float x0 = pb_cx - pred_ltrb[0];
-                float y0 = pb_cy - pred_ltrb[1];
-                float x1 = pb_cx + pred_ltrb[2];
-                float y1 = pb_cy + pred_ltrb[3];
-
-                Object obj;
-                obj.rect.x = x0;
-                obj.rect.y = y0;
-                obj.rect.width = x1 - x0;
-                obj.rect.height = y1 - y0;
-                obj.label = label;
-                obj.prob = score;
-
-                objects.push_back(obj);
             }
         }
-    }
-}
 
-static void generate_proposals(const ncnn::Mat& pred, const std::vector<int>& strides, const ncnn::Mat& in_pad, float prob_threshold, std::vector<Object>& objects)
-{
-    const int w = in_pad.w;
-    const int h = in_pad.h;
+        if (score >= prob_threshold)
+        {
+            Object obj;
+            obj.rect.x = pred_row[0];
+            obj.rect.y = pred_row[1];
+            obj.rect.width = pred_row[2] - pred_row[0];
+            obj.rect.height = pred_row[3] - pred_row[1];
+            obj.label = label;
+            obj.prob = score;
 
-    int pred_row_offset = 0;
-    for (size_t i = 0; i < strides.size(); i++)
-    {
-        const int stride = strides[i];
-
-        const int num_grid_x = w / stride;
-        const int num_grid_y = h / stride;
-        const int num_grid = num_grid_x * num_grid_y;
-
-        generate_proposals(pred.row_range(pred_row_offset, num_grid), stride, in_pad, prob_threshold, objects);
-        pred_row_offset += num_grid;
+            objects.push_back(obj);
+        }
     }
 }
 
@@ -277,13 +205,10 @@ int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
     int img_h = rgb.rows;
 
     // ultralytics/cfg/models/v8/yolov8.yaml
-    std::vector<int> strides(3);
-    strides[0] = 8;
-    strides[1] = 16;
-    strides[2] = 32;
+    // strides 8/16/32 baked into model graph by ultralytics export
     const int max_stride = 32;
 
-    // letterbox pad to multiple of max_stride
+    // letterbox pad to multiple of 32
     int w = img_w;
     int h = img_h;
     float scale = 1.f;
@@ -319,7 +244,7 @@ int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
     ex.extract("out0", out);
 
     std::vector<Object> proposals;
-    generate_proposals(out, strides, in_pad, prob_threshold, proposals);
+    generate_proposals(out, prob_threshold, proposals);
 
     // sort all proposals by score from highest to lowest
     qsort_descent_inplace(proposals);
