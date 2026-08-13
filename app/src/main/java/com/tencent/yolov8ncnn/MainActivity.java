@@ -50,6 +50,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback
     private static final int[] RES_W = {640, 1280, 1920, 2560};
     private static final int[] RES_H = {480, 720, 1080, 1440};
 
+    // sahi tile: 0=auto(640), 1=320
+    private int current_sahi_tile = 0;
+
+    private static final int[] SAHI_TILES = {0, 320};
+
     private SurfaceView cameraView;
 
     /** Called when the activity is first created. */
@@ -125,6 +130,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback
                 if (position != current_cpugpu)
                 {
                     current_cpugpu = position;
+                    reload();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> arg0)
+            {
+            }
+        });
+
+        Spinner spinnerSahiTile = (Spinner) findViewById(R.id.spinnerSahiTile);
+        spinnerSahiTile.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> arg0, View arg1, int position, long id)
+            {
+                if (position != current_sahi_tile)
+                {
+                    current_sahi_tile = position;
+                    yolov8ncnn.setSahiTileSize(SAHI_TILES[position]);
                     reload();
                 }
             }

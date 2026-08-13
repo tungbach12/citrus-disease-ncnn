@@ -274,6 +274,18 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_setResolution(
     return JNI_TRUE;
 }
 
+// public native boolean setSahiTileSize(int tileSize);
+// 0 = auto (=640, full-frame equivalent), 320 = smaller tiles for small objects.
+JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_setSahiTileSize(JNIEnv* env, jobject thiz, jint tileSize)
+{
+    __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "setSahiTileSize %d", (int)tileSize);
+
+    if (g_yolov8)
+        g_yolov8->set_sahi_tile_size((int)tileSize);
+
+    return JNI_TRUE;
+}
+
 // public native boolean setOutputWindow(Surface surface);
 JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_setOutputWindow(JNIEnv* env, jobject thiz, jobject surface)
 {

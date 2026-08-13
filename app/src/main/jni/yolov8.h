@@ -46,6 +46,7 @@ public:
 
     void set_det_target_size(int target_size);
     void set_sahi(bool enable);
+    void set_sahi_tile_size(int tile_size);
 
     virtual int detect(const cv::Mat& rgb, std::vector<Object>& objects) = 0;
     virtual int draw(cv::Mat& rgb, const std::vector<Object>& objects) = 0;
@@ -54,6 +55,7 @@ protected:
     ncnn::Net yolov8;
     int det_target_size;
     bool sahi_enable = false;
+    int sahi_tile_size = 0;  // 0 = auto (640)
 };
 
 class YOLOv8_det : public YOLOv8

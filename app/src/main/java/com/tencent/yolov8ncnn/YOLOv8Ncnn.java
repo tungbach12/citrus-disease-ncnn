@@ -23,6 +23,7 @@ public class YOLOv8Ncnn
     public native boolean openCamera(int facing);
     public native boolean closeCamera();
     public native boolean setResolution(int width, int height);
+    public native boolean setSahiTileSize(int tileSize);
     public native boolean setOutputWindow(Surface surface);
 
     static {

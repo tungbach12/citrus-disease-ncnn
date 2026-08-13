@@ -60,3 +60,9 @@ void YOLOv8::set_sahi(bool enable)
 {
     sahi_enable = enable;
 }
+
+void YOLOv8::set_sahi_tile_size(int tile_size)
+{
+    if (tile_size == 0 || (tile_size > 0 && tile_size <= 640))
+        sahi_tile_size = tile_size;
+}

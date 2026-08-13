@@ -252,8 +252,8 @@ int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
     const int img_w = rgb.cols;
     const int img_h = rgb.rows;
 
-    // SAHI slicing params (match scripts/drone_detect_sahi.py)
-    const int tile_size = 640;
+    // SAHI slicing params (configurable via set_sahi_tile_size, default 640)
+    const int tile_size = sahi_tile_size > 0 ? sahi_tile_size : 640;
     const float overlap = 0.25f;
 
     std::vector<Object> proposals;
