@@ -147,46 +147,55 @@ static void nms_sorted_bboxes(const std::vector<Object>& objects, std::vector<in
     }
 }
 
-static inline float sigmoid(float x)
-{
-    return 1.0f / (1.0f + expf(-x));
-}
-
-// ultralytics NCNN export: out0 is fully decoded, shape 8400 x (4 + num_class)
-//   cols 0-3 : x1, y1, x2, y2 (xyxy in 640-input pixel coords, already DFL-decoded)
-//   cols 4.. : per-class scores (already sigmoid'd)
+// ultralytics NCNN export: out0 has w=8400 (anchors), h=4+num_class (attributes).
+// It is attribute-major: row r holds attribute r for all 8400 anchors.
+//   row 0..3 : cx, cy, w, h  (already DFL-decoded and stride-scaled, in input-pixel coords)
+//   row 4..  : per-class scores (already sigmoid'd)
 static void generate_proposals(const ncnn::Mat& pred, float prob_threshold, std::vector<Object>& objects)
 {
-    const int num_row = pred.h;        // 8400
-    const int num_class = pred.w - 4;  // 39
+    const int num_anchor = pred.w;     // 8400
+    const int num_class = pred.h - 4;  // 39
 
-    for (int i = 0; i < num_row; i++)
+    if (num_anchor <= 0 || num_class <= 0)
+        return;
+
+    const float* ptr_cx = pred.row(0);
+    const float* ptr_cy = pred.row(1);
+    const float* ptr_bw = pred.row(2);
+    const float* ptr_bh = pred.row(3);
+
+    // precompute class-score row pointers
+    const float* score_ptrs[256];
+    for (int k = 0; k < num_class; k++)
+        score_ptrs[k] = pred.row(4 + k);
+
+    for (int i = 0; i < num_anchor; i++)
     {
-        const ncnn::Mat pred_row = pred.row_range(i, 1);
-
+        // find label with max score
         int label = -1;
         float score = -FLT_MAX;
+        for (int k = 0; k < num_class; k++)
         {
-            const ncnn::Mat pred_score = pred_row.range(4, num_class);
-
-            for (int k = 0; k < num_class; k++)
+            const float s = score_ptrs[k][i];
+            if (s > score)
             {
-                float s = pred_score[k];
-                if (s > score)
-                {
-                    label = k;
-                    score = s;
-                }
+                label = k;
+                score = s;
             }
         }
 
         if (score >= prob_threshold)
         {
+            const float cx = ptr_cx[i];
+            const float cy = ptr_cy[i];
+            const float bw = ptr_bw[i];
+            const float bh = ptr_bh[i];
+
             Object obj;
-            obj.rect.x = pred_row[0];
-            obj.rect.y = pred_row[1];
-            obj.rect.width = pred_row[2] - pred_row[0];
-            obj.rect.height = pred_row[3] - pred_row[1];
+            obj.rect.x = cx - bw * 0.5f;
+            obj.rect.y = cy - bh * 0.5f;
+            obj.rect.width = bw;
+            obj.rect.height = bh;
             obj.label = label;
             obj.prob = score;
 
@@ -204,11 +213,11 @@ int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
     int img_w = rgb.cols;
     int img_h = rgb.rows;
 
-    // ultralytics/cfg/models/v8/yolov8.yaml
-    // strides 8/16/32 baked into model graph by ultralytics export
-    const int max_stride = 32;
+    // ultralytics NCNN export bakes anchor points for a fixed square input
+    // (80x80 + 40x40 + 20x20 = 8400 for 640x640), so the padded input must be
+    // exactly target_size x target_size -- not just a multiple of the max stride.
 
-    // letterbox pad to multiple of 32
+    // letterbox: scale to fit inside target_size, keeping aspect ratio
     int w = img_w;
     int h = img_h;
     float scale = 1.f;
@@ -227,9 +236,9 @@ int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
 
     ncnn::Mat in = ncnn::Mat::from_pixels_resize(rgb.data, ncnn::Mat::PIXEL_RGB, img_w, img_h, w, h);
 
-    // letterbox pad to target_size rectangle
-    int wpad = (w + max_stride - 1) / max_stride * max_stride - w;
-    int hpad = (h + max_stride - 1) / max_stride * max_stride - h;
+    // pad to the full target_size square
+    int wpad = target_size - w;
+    int hpad = target_size - h;
     ncnn::Mat in_pad;
     ncnn::copy_make_border(in, in_pad, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, ncnn::BORDER_CONSTANT, 114.f);
 
