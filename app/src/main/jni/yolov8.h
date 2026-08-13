@@ -45,6 +45,7 @@ public:
     int load(AAssetManager* mgr, const char* parampath, const char* modelpath, bool use_gpu = false);
 
     void set_det_target_size(int target_size);
+    void set_sahi(bool enable);
 
     virtual int detect(const cv::Mat& rgb, std::vector<Object>& objects) = 0;
     virtual int draw(cv::Mat& rgb, const std::vector<Object>& objects) = 0;
@@ -52,6 +53,7 @@ public:
 protected:
     ncnn::Net yolov8;
     int det_target_size;
+    bool sahi_enable = false;
 };
 
 class YOLOv8_det : public YOLOv8

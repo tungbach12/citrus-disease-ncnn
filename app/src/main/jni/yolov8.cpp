@@ -55,3 +55,8 @@ void YOLOv8::set_det_target_size(int target_size)
 {
     det_target_size = target_size;
 }
+
+void YOLOv8::set_sahi(bool enable)
+{
+    sahi_enable = enable;
+}

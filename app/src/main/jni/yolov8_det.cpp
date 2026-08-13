@@ -147,6 +147,44 @@ static void nms_sorted_bboxes(const std::vector<Object>& objects, std::vector<in
     }
 }
 
+// SAHI-style IOS NMS: ratio of intersection over the SMALLER box (more
+// aggressive than IoU when one detection is contained in another, e.g. when
+// the same leaf is detected by overlapping tiles).
+static void nms_ios_sorted_bboxes(const std::vector<Object>& objects, std::vector<int>& picked, float ios_threshold)
+{
+    picked.clear();
+
+    const int n = objects.size();
+
+    std::vector<float> areas(n);
+    for (int i = 0; i < n; i++)
+    {
+        areas[i] = objects[i].rect.area();
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        const Object& a = objects[i];
+
+        int keep = 1;
+        for (int j = 0; j < (int)picked.size(); j++)
+        {
+            const Object& b = objects[picked[j]];
+
+            if (a.label != b.label)
+                continue;
+
+            float inter_area = intersection_area(a, b);
+            float smaller = std::min(areas[i], areas[picked[j]]);
+            if (smaller > 0.f && inter_area / smaller > ios_threshold)
+                keep = 0;
+        }
+
+        if (keep)
+            picked.push_back(i);
+    }
+}
+
 // ultralytics NCNN export: out0 has w=8400 (anchors), h=4+num_class (attributes).
 // It is attribute-major: row r holds attribute r for all 8400 anchors.
 //   row 0..3 : cx, cy, w, h  (already DFL-decoded and stride-scaled, in input-pixel coords)
@@ -206,86 +244,127 @@ static void generate_proposals(const ncnn::Mat& pred, float prob_threshold, std:
 
 int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
 {
-    const int target_size = det_target_size;//640;
-    const float prob_threshold = 0.25f;
+    const int target_size = det_target_size;  // 640
+    const float prob_threshold = sahi_enable ? 0.15f : 0.25f;
     const float nms_threshold = 0.45f;
+    const float ios_threshold = 0.5f;
 
-    int img_w = rgb.cols;
-    int img_h = rgb.rows;
+    const int img_w = rgb.cols;
+    const int img_h = rgb.rows;
+
+    // SAHI slicing params (match scripts/drone_detect_sahi.py)
+    const int tile_size = 640;
+    const float overlap = 0.25f;
+
+    std::vector<Object> proposals;
 
     // ultralytics NCNN export bakes anchor points for a fixed square input
     // (80x80 + 40x40 + 20x20 = 8400 for 640x640), so the padded input must be
     // exactly target_size x target_size -- not just a multiple of the max stride.
-
-    // letterbox: scale to fit inside target_size, keeping aspect ratio
-    int w = img_w;
-    int h = img_h;
-    float scale = 1.f;
-    if (w > h)
+    auto run_tile = [&](int x_off, int y_off, int tile_w, int tile_h)
     {
-        scale = (float)target_size / w;
-        w = target_size;
-        h = h * scale;
+        cv::Mat src;
+        if (x_off == 0 && y_off == 0 && tile_w == img_w && tile_h == img_h)
+            src = rgb;  // full frame, no copy
+        else
+            src = rgb(cv::Rect(x_off, y_off, tile_w, tile_h)).clone();
+
+        // letterbox: scale the tile to fit inside target_size, keeping aspect ratio
+        int w = tile_w;
+        int h = tile_h;
+        float scale = 1.f;
+        if (w > h)
+        {
+            scale = (float)target_size / w;
+            w = target_size;
+            h = h * scale;
+        }
+        else
+        {
+            scale = (float)target_size / h;
+            h = target_size;
+            w = w * scale;
+        }
+
+        ncnn::Mat in = ncnn::Mat::from_pixels_resize(src.data, ncnn::Mat::PIXEL_RGB, tile_w, tile_h, w, h);
+
+        // pad to the full target_size square
+        int wpad = target_size - w;
+        int hpad = target_size - h;
+        ncnn::Mat in_pad;
+        ncnn::copy_make_border(in, in_pad, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, ncnn::BORDER_CONSTANT, 114.f);
+
+        const float norm_vals[3] = {1 / 255.f, 1 / 255.f, 1 / 255.f};
+        in_pad.substract_mean_normalize(0, norm_vals);
+
+        ncnn::Extractor ex = yolov8.create_extractor();
+        ex.input("in0", in_pad);
+
+        ncnn::Mat out;
+        ex.extract("out0", out);
+
+        std::vector<Object> tile_objs;
+        generate_proposals(out, prob_threshold, tile_objs);
+
+        // map tile-local coords -> full image coords
+        for (Object& o : tile_objs)
+        {
+            float x0 = (o.rect.x - (wpad / 2)) / scale + x_off;
+            float y0 = (o.rect.y - (hpad / 2)) / scale + y_off;
+            float x1 = (o.rect.x + o.rect.width - (wpad / 2)) / scale + x_off;
+            float y1 = (o.rect.y + o.rect.height - (hpad / 2)) / scale + y_off;
+
+            x0 = std::max(std::min(x0, (float)(img_w - 1)), 0.f);
+            y0 = std::max(std::min(y0, (float)(img_h - 1)), 0.f);
+            x1 = std::max(std::min(x1, (float)(img_w - 1)), 0.f);
+            y1 = std::max(std::min(y1, (float)(img_h - 1)), 0.f);
+
+            o.rect.x = x0;
+            o.rect.y = y0;
+            o.rect.width = x1 - x0;
+            o.rect.height = y1 - y0;
+            proposals.push_back(o);
+        }
+    };
+
+    if (sahi_enable)
+    {
+        // SAHI grid: overlapping 640x640 tiles, step = 640*(1-0.25) = 480
+        const int step = (int)(tile_size * (1.f - overlap));  // 480
+        std::vector<int> xs, ys;
+        for (int p = 0; p + tile_size <= img_w; p += step) xs.push_back(p);
+        if (xs.empty() || xs.back() != img_w - tile_size) xs.push_back(std::max(0, img_w - tile_size));
+        for (int p = 0; p + tile_size <= img_h; p += step) ys.push_back(p);
+        if (ys.empty() || ys.back() != img_h - tile_size) ys.push_back(std::max(0, img_h - tile_size));
+
+        for (int y : ys)
+        {
+            for (int x : xs)
+            {
+                int tw = std::min(tile_size, img_w - x);
+                int th = std::min(tile_size, img_h - y);
+                run_tile(x, y, tw, th);
+            }
+        }
     }
     else
     {
-        scale = (float)target_size / h;
-        h = target_size;
-        w = w * scale;
+        run_tile(0, 0, img_w, img_h);
     }
-
-    ncnn::Mat in = ncnn::Mat::from_pixels_resize(rgb.data, ncnn::Mat::PIXEL_RGB, img_w, img_h, w, h);
-
-    // pad to the full target_size square
-    int wpad = target_size - w;
-    int hpad = target_size - h;
-    ncnn::Mat in_pad;
-    ncnn::copy_make_border(in, in_pad, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, ncnn::BORDER_CONSTANT, 114.f);
-
-    const float norm_vals[3] = {1 / 255.f, 1 / 255.f, 1 / 255.f};
-    in_pad.substract_mean_normalize(0, norm_vals);
-
-    ncnn::Extractor ex = yolov8.create_extractor();
-
-    ex.input("in0", in_pad);
-
-    ncnn::Mat out;
-    ex.extract("out0", out);
-
-    std::vector<Object> proposals;
-    generate_proposals(out, prob_threshold, proposals);
 
     // sort all proposals by score from highest to lowest
     qsort_descent_inplace(proposals);
 
-    // apply nms with nms_threshold
+    // apply NMS across all proposals (IOS when SAHI, IoU otherwise)
     std::vector<int> picked;
-    nms_sorted_bboxes(proposals, picked, nms_threshold);
+    if (sahi_enable)
+        nms_ios_sorted_bboxes(proposals, picked, ios_threshold);
+    else
+        nms_sorted_bboxes(proposals, picked, nms_threshold);
 
-    int count = picked.size();
-
-    objects.resize(count);
-    for (int i = 0; i < count; i++)
-    {
+    objects.resize(picked.size());
+    for (int i = 0; i < (int)picked.size(); i++)
         objects[i] = proposals[picked[i]];
-
-        // adjust offset to original unpadded
-        float x0 = (objects[i].rect.x - (wpad / 2)) / scale;
-        float y0 = (objects[i].rect.y - (hpad / 2)) / scale;
-        float x1 = (objects[i].rect.x + objects[i].rect.width - (wpad / 2)) / scale;
-        float y1 = (objects[i].rect.y + objects[i].rect.height - (hpad / 2)) / scale;
-
-        // clip
-        x0 = std::max(std::min(x0, (float)(img_w - 1)), 0.f);
-        y0 = std::max(std::min(y0, (float)(img_h - 1)), 0.f);
-        x1 = std::max(std::min(x1, (float)(img_w - 1)), 0.f);
-        y1 = std::max(std::min(y1, (float)(img_h - 1)), 0.f);
-
-        objects[i].rect.x = x0;
-        objects[i].rect.y = y0;
-        objects[i].rect.width = x1 - x0;
-        objects[i].rect.height = y1 - y0;
-    }
 
     // sort objects by area
     struct

@@ -173,43 +173,24 @@ JNIEXPORT void JNI_OnUnload(JavaVM* vm, void* reserved)
     g_camera = 0;
 }
 
-// public native boolean loadModel(AssetManager mgr, int taskid, int modelid, int cpugpu);
-JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIEnv* env, jobject thiz, jobject assetManager, jint taskid, jint modelid, jint cpugpu)
+// public native boolean loadModel(AssetManager mgr, int modelver, int sahi, int cpugpu);
+// modelver: 0=v1, 1=v2, 2=v3, 3=v4
+// sahi:     0=off (full-frame), 1=on (SAHI 640/0.25/IOS NMS 0.5)
+// cpugpu:   0=CPU, 1=GPU (Vulkan), 2=GPU (Turnip)
+JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIEnv* env, jobject thiz, jobject assetManager, jint modelver, jint sahi, jint cpugpu)
 {
-    if (taskid < 0 || taskid > 5 || modelid < 0 || modelid > 8 || cpugpu < 0 || cpugpu > 2)
+    if (modelver < 0 || modelver > 3 || sahi < 0 || sahi > 1 || cpugpu < 0 || cpugpu > 2)
     {
         return JNI_FALSE;
     }
 
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
 
-    __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "loadModel %p", mgr);
+    __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "loadModel modelver=%d sahi=%d cpugpu=%d mgr=%p", (int)modelver, (int)sahi, (int)cpugpu, mgr);
 
-    const char* tasknames[6] =
-    {
-        "",
-        "_oiv7",
-        "_seg",
-        "_pose",
-        "_cls",
-        "_obb"
-    };
-
-    const char* modeltypes[9] =
-    {
-        "n",
-        "s",
-        "m",
-        "n",
-        "s",
-        "m",
-        "n",
-        "s",
-        "m"
-    };
-
-    std::string parampath = std::string("yolov8") + modeltypes[(int)modelid] + tasknames[(int)taskid] + ".ncnn.param";
-    std::string modelpath = std::string("yolov8") + modeltypes[(int)modelid] + tasknames[(int)taskid] + ".ncnn.bin";
+    // citrus v1..v4 all share the 39-class detect head with imgsz=640
+    std::string parampath = "v" + std::to_string((int)modelver + 1) + ".ncnn.param";
+    std::string modelpath = "v" + std::to_string((int)modelver + 1) + ".ncnn.bin";
     bool use_gpu = (int)cpugpu == 1;
     bool use_turnip = (int)cpugpu == 2;
 
@@ -218,17 +199,16 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIE
         ncnn::MutexLockGuard g(lock);
 
         {
-            static int old_taskid = 0;
-            static int old_modelid = 0;
-            static int old_cpugpu = 0;
-            if (taskid != old_taskid || (modelid % 3) != old_modelid || cpugpu != old_cpugpu)
+            static int old_modelver = -1;
+            static int old_sahi = -1;
+            static int old_cpugpu = -1;
+            if (modelver != old_modelver || sahi != old_sahi || cpugpu != old_cpugpu)
             {
-                // taskid or model or cpugpu changed
                 delete g_yolov8;
                 g_yolov8 = 0;
             }
-            old_taskid = taskid;
-            old_modelid = modelid % 3;
+            old_modelver = modelver;
+            old_sahi = sahi;
             old_cpugpu = cpugpu;
 
             ncnn::destroy_gpu_instance();
@@ -244,21 +224,11 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIE
 
             if (!g_yolov8)
             {
-                if (taskid == 0) g_yolov8 = new YOLOv8_det_coco;
-                if (taskid == 1) g_yolov8 = new YOLOv8_det_oiv7;
-                if (taskid == 2) g_yolov8 = new YOLOv8_seg;
-                if (taskid == 3) g_yolov8 = new YOLOv8_pose;
-                if (taskid == 4) g_yolov8 = new YOLOv8_cls;
-                if (taskid == 5) g_yolov8 = new YOLOv8_obb;
-
+                g_yolov8 = new YOLOv8_det_coco;
                 g_yolov8->load(mgr, parampath.c_str(), modelpath.c_str(), use_gpu || use_turnip);
             }
-            int target_size = 320;
-            if ((int)modelid >= 3)
-                target_size = 480;
-            if ((int)modelid >= 6)
-                target_size = 640;
-            g_yolov8->set_det_target_size(target_size);
+            g_yolov8->set_det_target_size(640);
+            g_yolov8->set_sahi(sahi != 0);
         }
     }
 

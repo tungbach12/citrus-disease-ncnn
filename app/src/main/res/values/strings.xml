@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Citrus Disease</string>
-    <string-array name="task_array">
-        <item>detect</item>
+    <string-array name="modelver_array">
+        <item>v1</item>
+        <item>v2</item>
+        <item>v3</item>
+        <item>v4</item>
     </string-array>
-    <string-array name="model_array">
-        <item>n-640</item>
+    <string-array name="sahi_array">
+        <item>Không SAHI</item>
+        <item>Bật SAHI</item>
     </string-array>
     <string-array name="cpugpu_array">
         <item>CPU</item>

@@ -39,9 +39,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback
     private YOLOv8Ncnn yolov8ncnn = new YOLOv8Ncnn();
     private int facing = 0;
 
-    // Hardcode: task=0 (det coco, reused for citrus 39-class), model=6 (yolov8n-640)
-    private static final int TASK_ID = 0;
-    private static final int MODEL_ID = 6;
+    // modelver: 0=v1, 1=v2, 2=v3, 3=v4
+    private int current_modelver = 3;
+    // sahi: 0=off (full-frame), 1=on (SAHI 640/0.25/IOS NMS 0.5)
+    private int current_sahi = 0;
     private int current_cpugpu = 0;
 
     private SurfaceView cameraView;
@@ -75,6 +76,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback
             }
         });
 
+        Spinner spinnerModel = (Spinner) findViewById(R.id.spinnerModel);
+        spinnerModel.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> arg0, View arg1, int position, long id)
+            {
+                if (position != current_modelver)
+                {
+                    current_modelver = position;
+                    reload();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> arg0)
+            {
+            }
+        });
+
+        Spinner spinnerSAHI = (Spinner) findViewById(R.id.spinnerSAHI);
+        spinnerSAHI.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> arg0, View arg1, int position, long id)
+            {
+                if (position != current_sahi)
+                {
+                    current_sahi = position;
+                    reload();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> arg0)
+            {
+            }
+        });
+
         Spinner spinnerCPUGPU = (Spinner) findViewById(R.id.spinnerCPUGPU);
         spinnerCPUGPU.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
@@ -98,7 +135,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback
 
     private void reload()
     {
-        boolean ret_init = yolov8ncnn.loadModel(getAssets(), TASK_ID, MODEL_ID, current_cpugpu);
+        boolean ret_init = yolov8ncnn.loadModel(getAssets(), current_modelver, current_sahi, current_cpugpu);
         if (!ret_init)
         {
             Log.e("MainActivity", "yolov8ncnn loadModel failed");
