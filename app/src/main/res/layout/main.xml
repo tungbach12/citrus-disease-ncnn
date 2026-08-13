@@ -31,6 +31,13 @@
         android:entries="@array/sahi_array" />
 
     <Spinner
+        android:id="@+id/spinnerResolution"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:drawSelectorOnTop="true"
+        android:entries="@array/resolution_array" />
+
+    <Spinner
         android:id="@+id/spinnerCPUGPU"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

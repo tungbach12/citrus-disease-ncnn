@@ -35,6 +35,10 @@ public:
     int open(int camera_facing = 0);
     void close();
 
+    // pre-open config: must be called before open(). Used to set
+    // AImageReader size (i.e. camera preview resolution).
+    void set_imagereader_size(int w, int h);
+
     virtual void on_image(const cv::Mat& rgb) const;
 
     virtual void on_image(const unsigned char* nv21, int nv21_width, int nv21_height) const;
@@ -42,6 +46,10 @@ public:
 public:
     int camera_facing;
     int camera_orientation;
+
+    // requested image_reader size; 0 means use default (640x480)
+    int requested_image_w;
+    int requested_image_h;
 
 private:
     ACameraManager* camera_manager;

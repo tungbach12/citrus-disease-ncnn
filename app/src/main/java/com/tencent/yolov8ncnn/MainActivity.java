@@ -44,6 +44,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback
     // sahi: 0=off (full-frame), 1=on (SAHI 640/0.25/IOS NMS 0.5)
     private int current_sahi = 0;
     private int current_cpugpu = 0;
+    // resolution: 0=640x480, 1=1280x720, 2=1920x1080, 3=2560x1440
+    private int current_resolution = 1;
+
+    private static final int[] RES_W = {640, 1280, 1920, 2560};
+    private static final int[] RES_H = {480, 720, 1080, 1440};
 
     private SurfaceView cameraView;
 
@@ -121,6 +126,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback
                 {
                     current_cpugpu = position;
                     reload();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> arg0)
+            {
+            }
+        });
+
+        Spinner spinnerResolution = (Spinner) findViewById(R.id.spinnerResolution);
+        spinnerResolution.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> arg0, View arg1, int position, long id)
+            {
+                if (position != current_resolution)
+                {
+                    current_resolution = position;
+                    yolov8ncnn.setResolution(RES_W[position], RES_H[position]);
                 }
             }
 

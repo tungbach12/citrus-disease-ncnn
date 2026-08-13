@@ -177,10 +177,13 @@ NdkCamera::NdkCamera()
     capture_session_output = 0;
     capture_session = 0;
 
+    requested_image_w = 640;
+    requested_image_h = 480;
+
 
     // setup imagereader and its surface
     {
-        AImageReader_new(640, 480, AIMAGE_FORMAT_YUV_420_888, /*maxImages*/2, &image_reader);
+        AImageReader_new(requested_image_w, requested_image_h, AIMAGE_FORMAT_YUV_420_888, /*maxImages*/2, &image_reader);
 
         AImageReader_ImageListener listener;
         listener.context = this;
@@ -192,6 +195,12 @@ NdkCamera::NdkCamera()
 
         ANativeWindow_acquire(image_reader_surface);
     }
+}
+
+void NdkCamera::set_imagereader_size(int w, int h)
+{
+    requested_image_w = w;
+    requested_image_h = h;
 }
 
 NdkCamera::~NdkCamera()

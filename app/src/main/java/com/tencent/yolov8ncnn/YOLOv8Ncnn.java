@@ -22,6 +22,7 @@ public class YOLOv8Ncnn
     public native boolean loadModel(AssetManager mgr, int modelver, int sahi, int cpugpu);
     public native boolean openCamera(int facing);
     public native boolean closeCamera();
+    public native boolean setResolution(int width, int height);
     public native boolean setOutputWindow(Surface surface);
 
     static {

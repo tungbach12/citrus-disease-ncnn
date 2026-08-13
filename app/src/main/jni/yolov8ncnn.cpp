@@ -258,6 +258,22 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_closeCamera(JN
     return JNI_TRUE;
 }
 
+// public native boolean setResolution(int width, int height);
+// Note: only takes effect on the NEXT openCamera() call (camera must be re-opened).
+JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_setResolution(JNIEnv* env, jobject thiz, jint width, jint height)
+{
+    if (width < 320 || width > 3840 || height < 240 || height > 2160)
+        return JNI_FALSE;
+
+    __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "setResolution %d x %d", (int)width, (int)height);
+
+    g_camera->close();
+    g_camera->set_imagereader_size((int)width, (int)height);
+    g_camera->open(g_camera->camera_facing);
+
+    return JNI_TRUE;
+}
+
 // public native boolean setOutputWindow(Surface surface);
 JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_setOutputWindow(JNIEnv* env, jobject thiz, jobject surface)
 {
